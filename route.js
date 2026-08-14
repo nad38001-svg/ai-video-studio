@@ -1,50 +1,59 @@
-import Replicate from "replicate";
 import { NextResponse } from "next/server";
+import { InferenceClient } from "@huggingface/inference";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 export async function POST(req) {
   try {
-    const { prompt, duration = 8 } = await req.json();
+    const { prompt } = await req.json();
 
-    if (!process.env.REPLICATE_API_TOKEN) {
+    if (!process.env.HF_TOKEN) {
       return NextResponse.json(
-        { error: "REPLICATE_API_TOKEN is missing. Add it to .env.local or your hosting environment." },
+        { error: "HF_TOKEN is missing." },
         { status: 500 }
       );
     }
 
     if (!prompt || prompt.trim().length < 5) {
-      return NextResponse.json({ error: "Please enter a more detailed prompt." }, { status: 400 });
+      return NextResponse.json(
+        { error: "Please enter a more detailed prompt." },
+        { status: 400 }
+      );
     }
 
-    const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
+    const client = new InferenceClient(process.env.HF_TOKEN);
 
     const finalPrompt = `${prompt.trim()}
 
-Create a polished vertical social-media video. Keep the main characters visually consistent throughout.
-Use clear cinematic composition, expressive motion, natural lighting, readable action, and good pacing.
-Generate suitable spoken dialogue/voice and synchronized sound effects or background audio when appropriate.
-No subtitles unless the user explicitly asks for them.`;
+Create a polished vertical social-media video.
+Keep the main subject visually consistent.
+Use cinematic composition, natural lighting,
+smooth motion and clear action.
+No subtitles unless explicitly requested.`;
 
-    const output = await replicate.run("google/veo-3", {
-      input: {
-        prompt: finalPrompt,
-        duration: Number(duration),
-        resolution: "1080p",
-        aspect_ratio: "9:16",
-        generate_audio: true
-      }
+    const video = await client.textToVideo(finalPrompt, {
+      model: "Lightricks/LTX-Video-0.9.8-13B-distilled",
     });
 
-    const video = typeof output === "string" ? output : output?.url;
-    if (!video) throw new Error("The video provider returned no video URL.");
+    if (!video) {
+      throw new Error("No video was returned.");
+    }
 
-    return NextResponse.json({ video });
+    // Convert returned video into a browser-friendly data URL
+    const buffer = Buffer.from(await video.arrayBuffer());
+    const base64 = buffer.toString("base64");
+
+    return NextResponse.json({
+      video: `data:video/mp4;base64,${base64}`,
+    });
+
   } catch (error) {
     console.error(error);
+
     return NextResponse.json(
-      { error: error?.message || "Video generation failed." },
+      {
+        error: error?.message || "Video generation failed.",
+      },
       { status: 500 }
     );
   }
